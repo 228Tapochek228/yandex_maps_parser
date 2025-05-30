@@ -8,13 +8,11 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, NoSuchElementException, ElementClickInterceptedException, WebDriverException
 from bs4 import BeautifulSoup
-from typing import Dict, Optional
 import argparse
 import time
 import csv
 import os
 
-# Эмоджи для вывода
 EMOJIS = {
     "info": "ℹ️",
     "error": "❌",
@@ -41,7 +39,6 @@ def log_success(message):
     print(f"{EMOJIS['success']} [SUCCESS] {message}")
 
 def print_data(data):
-    """Красивый вывод данных в консоль с эмоджи"""
     if not data:
         log_info("No data to display")
         return
@@ -49,20 +46,19 @@ def print_data(data):
     log_info("Extracted data:")
     max_key_length = max(len(key) for key in data.keys())
     
-    # Специальные эмоджи для разных полей
     field_emojis = {
         "name": "🏢",
         "category": "🏷️",
         "rating": "⭐",
         "rating_count": "🔢",
         "website": "🌐",
-        "vk_group": "📱",
+        "social_networks": "📱",
         "phone": "📞",
         "address": "📍"
     }
     
     for key, value in data.items():
-        if value is None:
+        if value is None or value == '':
             value = "N/A"
         emoji = field_emojis.get(key, "➡️")
         print(f"  {emoji} {key.ljust(max_key_length)} : {value}")
@@ -131,51 +127,94 @@ def click_element_safely(driver, element):
         log_debug(f"Click failed: {type(e).__name__}")
         return False
 
-def extract_data(soup: BeautifulSoup) -> Dict[str, Optional[str]]:
-    def get_text_or_none(element) -> Optional[str]:
-        return element.get_text(strip=True) if element else None
-    
-    def get_attr_or_none(element, attr: str) -> Optional[str]:
-        return element.get(attr) if element else None
-    
+def extract_data(html) -> dict[str, str]:
     result = {
-        "name": None,
-        "category": None,
-        "rating": None,
-        "rating_count": None,
-        "website": None,
-        "vk_group": None,
-        "phone": None,
-        "address": None
+        "name": '',
+        "category": '',
+        "rating": '',
+        "rating_count": '',
+        "website": '',
+        "social_networks": '',
+        "phone": '',
+        "address": '' 
     }
+
+    soup = BeautifulSoup(html, 'lxml')
     
-    name_tag = soup.find('h1', class_='card-title-view__title')
-    result['name'] = get_text_or_none(name_tag)
-    
-    category_tag = soup.find('a', class_='business-categories-view__category')
-    if category_tag:
-        result['category'] = get_text_or_none(category_tag)
-    
-    rating_tag = soup.find('span', class_='business-rating-badge-view__rating-text')
-    result['rating'] = get_text_or_none(rating_tag)
-    
-    rating_count_tag = soup.find('div', class_='business-header-rating-view__text')
-    if rating_count_tag:
-        rating_text = rating_count_tag.get_text(strip=True)
-        result['rating_count'] = rating_text.split()[0] if rating_text else None
-    
-    website_tag = soup.find('a', class_='business-urls-view__link', itemprop='url')
-    result['website'] = get_attr_or_none(website_tag, 'href')
-    
-    vk_tag = soup.find('a', class_='business-contacts-view__social-button', href=lambda x: x and 'vk.com' in x)
-    result['vk_group'] = get_attr_or_none(vk_tag, 'href')
-    
-    phone_tag = soup.find('span', itemprop='telephone')
-    result['phone'] = get_text_or_none(phone_tag)
-    
-    address_tag = soup.find('div', class_='business-contacts-view__address-link')
-    result['address'] = get_text_or_none(address_tag)
-    
+    try:
+        # название заведения
+        name_tag = soup.select_one(".card-title-view__title-link")
+        if name_tag:
+            result["name"] = name_tag.text.strip()
+    except Exception as e:
+        log_debug(f"Error extracting name: {e}")
+
+    try:
+        # категории
+        categories_div = soup.select_one(".business-categories-view")
+        if categories_div:
+            categories = []
+            for categories_a in categories_div.find_all("a"):
+                text = categories_a.text.strip().strip(',')
+                if text:
+                    categories.append(text)
+            result["category"] = ','.join(categories)
+    except Exception as e:
+        log_debug(f"Error extracting categories: {e}")
+
+    try:
+        # рейтинг
+        rating_tag = soup.select_one(".business-rating-badge-view__rating-text")
+        if rating_tag:
+            result["rating"] = rating_tag.text.strip()
+    except Exception as e:
+        log_debug(f"Error extracting rating: {e}")
+
+    try:
+        # количество отзывов
+        rating_count_tag = soup.select_one(".business-header-rating-view__text")
+        if rating_count_tag:
+            rating_text = rating_count_tag.text.strip()
+            result["rating_count"] = rating_text.split()[0]
+    except Exception as e:
+        log_debug(f"Error extracting rating count: {e}")
+
+    try:
+        # адрес
+        address_tag = soup.select_one(".business-contacts-view__address-link")
+        if address_tag:
+            result["address"] = address_tag.text.strip()
+    except Exception as e:
+        log_debug(f"Error extracting address: {e}")
+
+    try:
+        # сайт
+        site_link = soup.select_one("a.business-urls-view__link[itemprop='url']")
+        if site_link:
+            result["website"] = site_link.get("href", "")
+    except Exception as e:
+        log_debug(f"Error extracting website: {e}")
+
+    try:
+        # телефон
+        phone_tag = soup.select_one("span[itemprop='telephone']")
+        if phone_tag:
+            result["phone"] = phone_tag.text.strip()
+    except Exception as e:
+        log_debug(f"Error extracting phone: {e}")
+
+    try:
+        # социальные сети
+        social_network_div = soup.select_one("div._view_normal:nth-child(4) > div:nth-child(1) > div:nth-child(1) > div:nth-child(2) > div:nth-child(1)")
+        if social_network_div:
+            for social_network in social_network_div.find_all('div', recursive=False):
+                social_network = social_network.find('a')
+                social_network = str(social_network.get("href"))
+                result["social_networks"] += f"{social_network},"
+        result["social_networks"] = result["social_networks"].rstrip(',')
+    except Exception as e:
+        log_debug(f"Error extracting social networks: {e}")
+
     return result
 
 def check_list_end(driver):
@@ -213,7 +252,7 @@ def check_list_end(driver):
 
 def save_to_csv(data, filename, mode='a'):
     """Улучшенная функция сохранения в CSV с проверкой существования файла"""
-    headers = ['name', 'category', 'rating', 'rating_count', 'website', 'vk_group', 'phone', 'address']
+    headers = ['name', 'category', 'rating', 'rating_count', 'website', 'social_networks', 'phone', 'address']
     
     file_exists = os.path.isfile(filename)
     
@@ -237,8 +276,8 @@ def process_search_results(driver, check_interval=1):
     last_item_count = 0
     processed_elements = set()
     attempt = 0
-    failed_attempts = 0  # Счетчик неудачных попыток получить новые элементы
-    max_failed_attempts = 10  # Максимальное количество неудачных попыток
+    failed_attempts = 0
+    max_failed_attempts = 10
     
     while True:
         attempt += 1
@@ -276,12 +315,10 @@ def process_search_results(driver, check_interval=1):
                 
                 time.sleep(check_interval)
                 
-                # Проверка конца списка
                 if check_list_end(driver):
                     log_info("Reached the end of the list")
                     return
                 
-                # Проверка количества неудачных попыток
                 failed_attempts += 1
                 if failed_attempts >= max_failed_attempts:
                     log_info(f"Reached maximum failed attempts ({max_failed_attempts}), stopping")
@@ -290,7 +327,6 @@ def process_search_results(driver, check_interval=1):
                     log_debug(f"Failed attempts: {failed_attempts}/{max_failed_attempts}")
                     continue
             else:
-                # Сброс счетчика неудачных попыток при успешном получении новых элементов
                 failed_attempts = 0
                 
             new_items = current_items[last_item_count:] if last_item_count > 0 else current_items
@@ -314,7 +350,7 @@ def process_search_results(driver, check_interval=1):
                             processed_elements.add(element_key)
                             log_debug("Click successful")
                             time.sleep(1)
-                            data = extract_data(BeautifulSoup(driver.page_source, 'lxml'))
+                            data = extract_data(driver.page_source)
                             if data:
                                 print_data(data)
                                 save_to_csv(data, args.output or "output.csv", 'a')
@@ -354,9 +390,10 @@ def main():
 
     log_info(f"{EMOJIS['web']} Starting Yandex Maps crawler")
     driver = init_webdriver()
-    driver.fullscreen_window()
     
     try:
+        driver.maximize_window()
+
         queries = read_file(args.queries)
         if not queries:
             log_critical("No queries found in input file")
